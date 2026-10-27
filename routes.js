@@ -45,7 +45,7 @@
       transfers: {
         grandCentral: ["6 to 4/5 at Grand Central", 0],
         fulton: ["4/5 to A/C at Fulton St", 1],
-        courtSq: ["E/F to G at Court Sq", 3],
+        courtSq: ["E/F to G at Court Sq", 2],
       },
       paths: [
         [
