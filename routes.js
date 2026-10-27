@@ -7,6 +7,8 @@
   // The 4 makes local stops late at night.
   const LEX_LOCAL = ["6", "6X", "4"];
   const SIXTH_AV = ["F", "FX", "M"];
+  // The M leaves the F at W 4 St, so only the F reaches Jay St.
+  const F_ONLY = ["F", "FX"];
   const ACE_FEED = "nyct%2Fgtfs-ace";
   const NUMBERED_FEED = "nyct%2Fgtfs";
   const BDFM_FEED = "nyct%2Fgtfs-bdfm";
@@ -63,7 +65,7 @@
       paths: [
         [
           { routes: AC, from: "A42N", to: "A41N" },
-          { routes: SIXTH_AV, from: "A41N", to: "D19N", transfer: "jay" },
+          { routes: F_ONLY, from: "A41N", to: "D19N", transfer: "jay" },
         ],
         [
           { routes: AC, from: "A42N", to: "A32N" },
@@ -82,7 +84,7 @@
           { routes: AC, from: "A32S", to: "A42S", transfer: "w4" },
         ],
         [
-          { routes: SIXTH_AV, from: "D19S", to: "A41S" },
+          { routes: F_ONLY, from: "D19S", to: "A41S" },
           { routes: AC, from: "A41S", to: "A42S", transfer: "jay" },
         ],
       ],
