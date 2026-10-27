@@ -20,7 +20,7 @@
   const LEAVE_NOW_SPAN_SECONDS = 60 * 60;
   // Hard floor between trains at every transfer, whatever the settings say, so a held door
   // on the train you're on doesn't cost you the connection.
-  const MIN_TRANSFER_SECONDS = 30;
+  const MIN_TRANSFER_SECONDS = 15;
   const STORE_KEY = "mta-commute:" + ID;
   const FEED_STORE_KEY = "mta-commute:" + ID + ":feeds";
   const ROUTES = new Set(C.paths.flat().flatMap((leg) => leg.routes));
@@ -89,7 +89,7 @@
       '<section><h2 id="window-title">Best trips</h2><div id="alerts"></div><div id="plans" class="legs"></div></section>' +
       '<section id="nearby-section" hidden><h2 id="nearby-title"></h2><div id="nearby" class="card nearby"></div></section>' +
       '<details class="card" id="settings"><summary>Transfer times</summary><div class="fields">' + transferFields + "</div>" +
-      '<p class="note">Every transfer gets at least 30 seconds between trains, even if set lower. ' +
+      '<p class="note">Every transfer gets at least 15 seconds between trains, even if set lower. ' +
       "Arrive between picks the shortest trip that arrives inside the window, ties to the later departure. " +
       "Leave now picks the soonest arrival, ties to the later departure.</p></details>" +
       "</main>" +

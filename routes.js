@@ -76,7 +76,7 @@
       from: "Hoyt-Schermerhorn", to: "14 St", fromRoutes: AC, toRoutes: ["F", "M"],
       feeds: [ACE_FEED, BDFM_FEED],
       mode: "now", earliest: "09:20", latest: "09:30",
-      transfers: { jay: ["A/C to F at Jay St", 1], w4: ["A/C to F/M at W 4 St", 2] },
+      transfers: { jay: ["A/C to F at Jay St", 0], w4: ["A/C to F/M at W 4 St", 2] },
       paths: [
         [
           { routes: AC, from: "A42N", to: "A41N" },
@@ -92,7 +92,7 @@
       from: "14 St", to: "Hoyt-Schermerhorn", fromRoutes: ["F", "M"], toRoutes: AC,
       feeds: [BDFM_FEED, ACE_FEED],
       mode: "now", earliest: "18:30", latest: "18:45",
-      transfers: { w4: ["F/M to A/C at W 4 St", 2], jay: ["F to A/C at Jay St", 1] },
+      transfers: { w4: ["F/M to A/C at W 4 St", 2], jay: ["F to A/C at Jay St", 0] },
       paths: [
         [
           { routes: SIXTH_AV, from: "D19S", to: "D20S" },
