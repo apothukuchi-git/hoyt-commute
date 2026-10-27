@@ -1,0 +1,26 @@
+name: Refresh timetable
+
+on:
+  schedule:
+    - cron: "0 8 * * *" # 4am New York (EDT), before the morning commute
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 build_schedule.py schedule.json
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- schedule.json; then
+            echo "Timetable unchanged"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Refresh timetable"
+          git push
