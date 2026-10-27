@@ -253,7 +253,7 @@ footer.wrap { padding-block: 0 28px; }
       <label for="ac-transfer">A/C to 4/5 at Fulton (min)<input id="ac-transfer" type="number" min="0" max="15" step="0.5" value="1" inputmode="decimal"></label>
       <label for="six-transfer">4/5 to 6 at Grand Central (min)<input id="six-transfer" type="number" min="0" max="10" step="0.5" value="0" inputmode="decimal"></label>
     </div>
-    <p class="note">Picks the shortest trip that arrives inside the window; ties go to the later departure.</p>
+    <p class="note">Every transfer gets at least 30 seconds between trains, even if set lower. Picks the shortest trip that arrives inside the window; ties go to the later departure.</p>
   </details>
 </main>
 
@@ -277,6 +277,9 @@ footer.wrap { padding-block: 0 28px; }
   const FETCH_TIMEOUT_SECONDS = 12;
   const STALE_SECONDS = 90;
   const TRANSFER_OPTIONS = 2;
+  // Hard floor between trains at every transfer, whatever the settings say, so a held door
+  // on the train you're on doesn't cost you the connection.
+  const MIN_TRANSFER_SECONDS = 30;
   const STORE_KEY = "hoyt-commute:v1";
   const FEED_STORE_KEY = "hoyt-commute:feeds";
   const SAVED_STOPS = [P.HOYT, P.FULTON_AC, P.FULTON_45, P.GRAND_CENTRAL, P.FIFTY_FIRST];
@@ -354,6 +357,8 @@ footer.wrap { padding-block: 0 28px; }
   const source = (trip) => (trip.scheduled ? '<span class="src sched">timetable</span>' : '<span class="src">live</span>');
 
   // Gap between arriving and the next train leaving, judged against the transfer time you set.
+  const transferSeconds = (key) => Math.max(MIN_TRANSFER_SECONDS, state.settings[key] * 60);
+
   function gapChip(gap, transfer) {
     const spare = gap - transfer;
     const kind = spare < 0 ? "sprint" : spare < 60 ? "tight" : "easy";
@@ -522,8 +527,8 @@ footer.wrap { padding-block: 0 28px; }
   }
 
   function journeyCard(journey, isBest) {
-    const ac = state.settings.acTransfer * 60;
-    const six = state.settings.sixTransfer * 60;
+    const ac = transferSeconds("acTransfer");
+    const six = transferSeconds("sixTransfer");
     const fultonGap = P.board(journey.express, P.FULTON_45) - P.alight(journey.ac, P.FULTON_AC);
     const gcGap = P.board(journey.local, P.GRAND_CENTRAL) - P.alight(journey.express, P.GRAND_CENTRAL);
     const leg = (trip, from, to) =>
@@ -556,8 +561,8 @@ footer.wrap { padding-block: 0 28px; }
     $("alerts").innerHTML = alerts.join("");
     if (!state.live && !state.schedule) { $("plans").innerHTML = ""; return; }
 
-    const ac = state.settings.acTransfer * 60;
-    const six = state.settings.sixTransfer * 60;
+    const ac = transferSeconds("acTransfer");
+    const six = transferSeconds("sixTransfer");
     const journeys = P.plan(state.trips, ac, six).filter((j) => j.depart > now() - 30);
     const inWindow = P.rank(journeys.filter((j) => j.arrive >= bounds.earliest && j.arrive <= bounds.latest));
     renderNearby(journeys, bounds, inWindow[0]);
@@ -615,8 +620,8 @@ footer.wrap { padding-block: 0 28px; }
       return;
     }
     box.hidden = false;
-    const ac = state.settings.acTransfer * 60;
-    const six = state.settings.sixTransfer * 60;
+    const ac = transferSeconds("acTransfer");
+    const six = transferSeconds("sixTransfer");
     const acTrip = findTrip(tracking.ac);
     const express = tracking.express ? findTrip(tracking.express) : null;
     const acReach = acTrip ? P.alight(acTrip, P.FULTON_AC) : null;
