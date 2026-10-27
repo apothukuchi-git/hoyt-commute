@@ -267,18 +267,31 @@ footer.wrap { padding-block: 0 28px; }
   const P = window.Planner;
   const BASE = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/";
   const FEEDS = ["nyct%2Fgtfs-ace", "nyct%2Fgtfs"];
-  // Rate limits: poll only while visible, never more than once per MIN_GAP_SECONDS.
+  // Rate limits: poll only while visible, and never reach the MTA more than once per
+  // MIN_GAP_SECONDS. Requests that die on a dead connection never reached the MTA, so those
+  // retry quickly; real MTA errors back off.
   const REFRESH_SECONDS = 20;
   const MIN_GAP_SECONDS = 15;
+  const OFFLINE_RETRY_SECONDS = 5;
+  const MAX_BACKOFF_SECONDS = 120;
+  const FETCH_TIMEOUT_SECONDS = 12;
+  const STALE_SECONDS = 90;
+  const TRANSFER_OPTIONS = 2;
   const STORE_KEY = "hoyt-commute:v1";
+  const FEED_STORE_KEY = "hoyt-commute:feeds";
+  const SAVED_STOPS = [P.HOYT, P.FULTON_AC, P.FULTON_45, P.GRAND_CENTRAL, P.FIFTY_FIRST];
   const STOP_LABEL = { A42N: "Hoyt-Schermerhorn", A38N: "Fulton St", "418N": "Fulton St", "631N": "Grand Central", "630N": "51 St" };
 
   const $ = (id) => document.getElementById(id);
   const state = {
     schedule: null,
     live: null,
+    feeds: {},
     trips: new Map(),
-    fetchedAt: 0,
+    lastReached: 0,
+    nextAttemptAt: 0,
+    httpFailures: 0,
+    offline: false,
     error: "",
     inFlight: false,
     settings: { earliest: "09:20", latest: "09:30", acTransfer: 1, sixTransfer: 0 },
@@ -371,47 +384,141 @@ footer.wrap { padding-block: 0 28px; }
     state.trips = new Map([...(bounds.tomorrow ? [] : live), ...scheduled]);
   }
 
-  async function refresh(force) {
-    if (state.inFlight) return;
-    if (!force && now() - state.fetchedAt < MIN_GAP_SECONDS) return;
-    state.inFlight = true;
-    state.fetchedAt = now();
-    renderStatus();
+  class HttpError extends Error {}
+
+  async function fetchWithTimeout(url, options) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_SECONDS * 1000);
     try {
-      if (!state.schedule) {
-        const response = await fetch("schedule.json", { cache: "no-cache" });
-        if (response.ok) state.schedule = await response.json();
-      }
-      const feeds = [];
-      for (const feed of FEEDS) {
-        const response = await fetch(BASE + feed);
-        if (!response.ok) throw new Error("MTA returned HTTP " + response.status);
-        feeds.push(P.parseFeed(await response.arrayBuffer()));
-      }
-      state.live = P.mergeFeeds(feeds);
-      state.error = "";
-    } catch (error) {
-      state.error = error.message || String(error);
+      return await fetch(url, { ...options, signal: controller.signal });
     } finally {
-      state.inFlight = false;
-      rebuildTrips();
-      render();
+      clearTimeout(timer);
     }
   }
 
+  // Only the five stops the planner reads, so the saved copy stays small.
+  function saveFeeds() {
+    const compact = {};
+    for (const [name, feed] of Object.entries(state.feeds)) {
+      compact[name] = {
+        timestamp: feed.timestamp,
+        trips: [...feed.trips.values()].map((t) => {
+          const times = {};
+          for (const stop of SAVED_STOPS) if (t.times[stop]) times[stop] = t.times[stop];
+          return [t.tripId, t.route, times, t.lastStop];
+        }),
+        vehicles: [...feed.vehicles.entries()].map(([id, v]) => [id, v.stopId, v.status, v.timestamp]),
+      };
+    }
+    try { localStorage.setItem(FEED_STORE_KEY, JSON.stringify(compact)); } catch (_) { /* best effort */ }
+  }
+
+  function restoreFeeds() {
+    try {
+      const compact = JSON.parse(localStorage.getItem(FEED_STORE_KEY) || "{}");
+      for (const [name, feed] of Object.entries(compact)) {
+        if (now() - feed.timestamp > 3 * 3600) continue;
+        state.feeds[name] = {
+          timestamp: feed.timestamp,
+          trips: new Map(feed.trips.map(([tripId, route, times, lastStop]) => [tripId, { tripId, route, times, lastStop }])),
+          vehicles: new Map(feed.vehicles.map(([id, stopId, status, timestamp]) => [id, { stopId, status, timestamp }])),
+        };
+      }
+    } catch (_) { /* nothing saved */ }
+    mergeLive();
+  }
+
+  function mergeLive() {
+    const feeds = Object.values(state.feeds);
+    state.live = feeds.length ? P.mergeFeeds(feeds) : null;
+  }
+
+  async function loadSchedule() {
+    if (state.schedule) return;
+    try {
+      const response = await fetchWithTimeout("schedule.json", { cache: "no-cache" });
+      if (response.ok) state.schedule = await response.json();
+    } catch (_) { /* retried on the next refresh */ }
+  }
+
+  // manual: the Refresh button. It may retry a dead connection at once, but still never
+  // reaches the MTA within MIN_GAP_SECONDS of the last time it did.
+  async function refresh(manual) {
+    if (state.inFlight || now() - state.lastReached < MIN_GAP_SECONDS) return;
+    if (!manual && now() < state.nextAttemptAt) return;
+    if (navigator.onLine === false) {
+      state.offline = true;
+      state.nextAttemptAt = now() + OFFLINE_RETRY_SECONDS;
+      render();
+      return;
+    }
+    state.inFlight = true;
+    renderStatus();
+    await loadSchedule();
+    let outcome = "ok";
+    for (const feed of FEEDS) {
+      try {
+        const response = await fetchWithTimeout(BASE + feed);
+        state.lastReached = now();
+        if (!response.ok) throw new HttpError("MTA returned HTTP " + response.status);
+        state.feeds[feed] = P.parseFeed(await response.arrayBuffer());
+      } catch (error) {
+        outcome = error instanceof HttpError ? "http" : "network";
+        state.error = error.message || String(error);
+        break;
+      }
+    }
+    if (outcome === "ok") {
+      state.offline = false;
+      state.error = "";
+      state.httpFailures = 0;
+      state.nextAttemptAt = now() + REFRESH_SECONDS;
+    } else if (outcome === "network") {
+      state.offline = true;
+      state.nextAttemptAt = now() + OFFLINE_RETRY_SECONDS;
+    } else {
+      state.offline = false;
+      state.httpFailures += 1;
+      state.nextAttemptAt = now() + Math.min(MAX_BACKOFF_SECONDS, REFRESH_SECONDS * 2 ** state.httpFailures);
+    }
+    // Keep whichever feeds did arrive, even when the other one failed.
+    mergeLive();
+    if (state.live) saveFeeds();
+    state.inFlight = false;
+    rebuildTrips();
+    render();
+  }
+
+  function dataAge() {
+    return state.live ? Math.max(0, Math.round(now() - state.live.timestamp)) : null;
+  }
+
+  const ago = (seconds) => (seconds < 90 ? seconds + "s" : Math.round(seconds / 60) + " min");
+
   function renderStatus() {
     const button = $("refresh");
-    const wait = Math.ceil(MIN_GAP_SECONDS - (now() - state.fetchedAt));
-    button.disabled = state.inFlight || wait > 0;
+    button.disabled = state.inFlight || now() - state.lastReached < MIN_GAP_SECONDS;
     button.textContent = state.inFlight ? "Refreshing…" : "Refresh";
+    const age = dataAge();
+    const next = Math.max(0, Math.ceil(state.nextAttemptAt - now()));
     let text;
-    if (!state.live) text = state.error ? "Couldn't reach the MTA" : "Loading trains…";
-    else {
-      const age = Math.max(0, Math.round(now() - state.live.timestamp));
-      const next = Math.max(0, Math.ceil(REFRESH_SECONDS - (now() - state.fetchedAt)));
-      text = "Feed " + age + "s old · " + (document.hidden ? "paused" : "next update " + next + "s");
-    }
+    if (state.offline) text = "No connection · " + (age === null ? "no saved trains" : "trains as of " + ago(age) + " ago") + " · retrying";
+    else if (state.error) text = "MTA error · retrying in " + next + "s";
+    else if (age === null) text = "Loading trains…";
+    else text = "Feed " + ago(age) + " old · " + (document.hidden ? "paused" : state.inFlight ? "updating" : "next update " + next + "s");
     $("status").textContent = text;
+  }
+
+  function statusAlert() {
+    const age = dataAge();
+    if (state.offline) {
+      return '<div class="alert">No connection. ' + (state.live
+        ? "Showing trains as of " + clock(state.live.timestamp) + " (" + ago(age) + " ago); predictions may have shifted. "
+        : "No saved trains yet. ") + "This updates on its own when you're back in signal.</div>";
+    }
+    if (state.error) return '<div class="alert error">' + escapeHtml(state.error) + ". " + (state.live ? "Showing the last update. " : "") + "Retrying automatically.</div>";
+    if (age !== null && age > STALE_SECONDS) return '<div class="alert">These trains are ' + ago(age) + " old.</div>";
+    return "";
   }
 
   function journeyCard(journey, isBest) {
@@ -443,8 +550,8 @@ footer.wrap { padding-block: 0 28px; }
   function renderPlans() {
     const bounds = windowBounds();
     $("window-title").textContent = "Best trips · arrive " + clock(bounds.earliest).replace(/:00$/, "") + "–" + clock(bounds.latest).replace(/:00$/, "") + (bounds.tomorrow ? " tomorrow" : "");
-    const alerts = [];
-    if (state.error) alerts.push('<div class="alert error">Couldn\'t reach the MTA (' + escapeHtml(state.error) + "). " + (state.live ? "Showing the last update." : "") + "</div>");
+    // The tracker shows the connection banner itself when it's open.
+    const alerts = [isTracking() ? "" : statusAlert()];
     if (bounds.tomorrow) alerts.push('<div class="alert">That window has passed for today, so this is tomorrow\'s timetable. Live times start about 40 minutes ahead.</div>');
     $("alerts").innerHTML = alerts.join("");
     if (!state.live && !state.schedule) { $("plans").innerHTML = ""; return; }
@@ -498,10 +605,12 @@ footer.wrap { padding-block: 0 28px; }
     return String(Math.floor(total / 60)).padStart(2, "0") + ":" + String(total % 60).padStart(2, "0");
   }
 
+  const isTracking = () => Boolean(state.tracking && state.tracking.date === nyDate(now()));
+
   function renderTracker() {
     const box = $("tracker");
     const tracking = state.tracking;
-    if (!tracking || tracking.date !== nyDate(now())) {
+    if (!isTracking()) {
       box.hidden = true;
       return;
     }
@@ -513,7 +622,7 @@ footer.wrap { padding-block: 0 28px; }
     const acReach = acTrip ? P.alight(acTrip, P.FULTON_AC) : null;
     const expressReach = express ? P.alight(express, P.GRAND_CENTRAL) : null;
     const onExpress = express && expressReach && (!acReach || acReach < now());
-    let html = '<div class="card best"><div class="track-head"><h3>Tracking your ' + bullet(onExpress ? express.route : (acTrip ? acTrip.route : "A")) + "</h3>" +
+    let html = statusAlert() + '<div class="card best"><div class="track-head"><h3>Tracking your ' + bullet(onExpress ? express.route : (acTrip ? acTrip.route : "A")) + "</h3>" +
       '<button class="ghost" type="button" data-stop>Stop</button></div>';
 
     if (!onExpress) {
@@ -526,7 +635,7 @@ footer.wrap { padding-block: 0 28px; }
           : "";
         html += '<div><div class="big-eta">Reaches Fulton St ' + clock(acReach) + ' <span class="sub" data-countdown="' + acReach + '"></span></div>' +
           '<div class="sub">' + escapeHtml(vehicleLine(acTrip)) + " " + (acTrip.scheduled ? "· timetable, not yet live" : "") + "</div></div>";
-        const options = P.fultonOptions(state.trips, acReach, six, 4);
+        const options = P.fultonOptions(state.trips, acReach, six, TRANSFER_OPTIONS);
         html += "<h2>Uptown 4/5 at Fulton St · tap the one you catch</h2>" + optionList(options.map((o) => ({
           id: o.express.tripId, route: o.express.route, when: P.board(o.express, P.FULTON_45),
           chip: gapChip(o.gap, ac), arrive: o.arrive, trip: o.express, kind: "express",
@@ -537,7 +646,7 @@ footer.wrap { padding-block: 0 28px; }
     if (express && expressReach) {
       html += '<div><div class="big-eta">Your ' + escapeHtml(express.route) + " reaches Grand Central " + clock(expressReach) + ' <span class="sub" data-countdown="' + expressReach + '"></span></div>' +
         (onExpress ? '<div class="sub">' + escapeHtml(vehicleLine(express)) + "</div>" : "") + "</div>";
-      const options = P.grandCentralOptions(state.trips, expressReach, 3);
+      const options = P.grandCentralOptions(state.trips, expressReach, TRANSFER_OPTIONS);
       html += "<h2>Uptown 6 at Grand Central</h2>" + optionList(options.map((o) => ({
         id: o.local.tripId, route: o.local.route, when: P.board(o.local, P.GRAND_CENTRAL),
         chip: gapChip(o.gap, six), arrive: o.arrive, trip: o.local, kind: "local",
@@ -613,7 +722,7 @@ footer.wrap { padding-block: 0 28px; }
       state.tracking = null;
       keepAwake(false);
     } else if (event.target.id === "refresh") {
-      refresh(false);
+      refresh(true);
       return;
     } else {
       return;
@@ -636,6 +745,7 @@ footer.wrap { padding-block: 0 28px; }
 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
+      state.nextAttemptAt = 0;
       refresh(false);
       if (state.tracking) keepAwake(true);
     }
@@ -644,10 +754,26 @@ footer.wrap { padding-block: 0 28px; }
 
   setInterval(() => {
     tickCountdowns();
-    if (!document.hidden && now() - state.fetchedAt >= REFRESH_SECONDS) refresh(false);
+    if (!document.hidden) refresh(false);
   }, 1000);
 
+  // Back in signal: try right away instead of waiting out the retry timer.
+  window.addEventListener("online", () => {
+    state.nextAttemptAt = 0;
+    refresh(false);
+  });
+  window.addEventListener("offline", () => {
+    state.offline = true;
+    render();
+  });
+
+  // Keeps the page, planner and timetable on the phone so a reload underground still opens.
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+
   load();
+  restoreFeeds();
+  rebuildTrips();
+  render();
   refresh(true);
 })();
 </script>
