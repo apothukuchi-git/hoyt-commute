@@ -1,16 +1,6 @@
-// GTFS-realtime decoding and journey planning for Hoyt-Schermerhorn -> 51 St.
-// Pure functions only; index.html owns fetching and rendering. Also loads in Node for tests.
+// GTFS-realtime decoding and journey planning for the commute pages.
+// Pure functions only; app.js owns fetching and rendering. Also loads in Node for tests.
 (function (root) {
-  const HOYT = "A42N";
-  const FULTON_AC = "A38N";
-  const FULTON_45 = "418N";
-  const GRAND_CENTRAL = "631N";
-  const FIFTY_FIRST = "630N";
-  const AC_ROUTES = new Set(["A", "C"]);
-  const EXPRESS_ROUTES = new Set(["4", "5"]);
-  const LOCAL_ROUTES = new Set(["6", "6X"]);
-  const ROUTES = new Set([...AC_ROUTES, ...EXPRESS_ROUTES, ...LOCAL_ROUTES]);
-
   const utf8 = new TextDecoder();
 
   // Minimal protobuf wire-format reader. Feed timestamps (~1.8e9) fit in a JS number,
@@ -68,9 +58,10 @@
     return trip;
   }
 
-  // Returns {timestamp, trips: Map(tripId -> {tripId, route, times: {stopId: [arrive, depart]}, lastStop}),
-  //          vehicles: Map(tripId -> {stopId, status, timestamp})}
-  function parseFeed(buffer) {
+  // Keeps only trips on `routes` (a Set). Returns
+  // {timestamp, trips: Map(tripId -> {tripId, route, times: {stopId: [arrive, depart]}, lastStop}),
+  //  vehicles: Map(tripId -> {stopId, status, timestamp})}
+  function parseFeed(buffer, routes) {
     const bytes = new Uint8Array(buffer);
     const feed = { timestamp: 0, trips: new Map(), vehicles: new Map() };
     eachField(bytes, 0, bytes.length, (field, value) => {
@@ -80,15 +71,15 @@
         });
       } else if (field === 2) {
         eachField(bytes, value[0], value[1], (f, v) => {
-          if (f === 3) parseTripUpdate(bytes, v, feed);
-          else if (f === 4) parseVehicle(bytes, v, feed);
+          if (f === 3) parseTripUpdate(bytes, v, feed, routes);
+          else if (f === 4) parseVehicle(bytes, v, feed, routes);
         });
       }
     });
     return feed;
   }
 
-  function parseTripUpdate(bytes, range, feed) {
+  function parseTripUpdate(bytes, range, feed, routes) {
     let trip = null;
     const stops = [];
     eachField(bytes, range[0], range[1], (field, value) => {
@@ -103,7 +94,7 @@
         stops.push(stop);
       }
     });
-    if (!trip || !ROUTES.has(trip.route) || stops.length === 0) return;
+    if (!trip || !routes.has(trip.route) || stops.length === 0) return;
     const times = {};
     for (const stop of stops) {
       times[stop.stopId] = [stop.arrive || stop.depart, stop.depart || stop.arrive];
@@ -111,7 +102,7 @@
     feed.trips.set(trip.tripId, { ...trip, times, lastStop: stops[stops.length - 1].stopId });
   }
 
-  function parseVehicle(bytes, range, feed) {
+  function parseVehicle(bytes, range, feed, routes) {
     let trip = null;
     const vehicle = { stopId: "", status: 2, timestamp: 0 };
     eachField(bytes, range[0], range[1], (field, value) => {
@@ -120,7 +111,7 @@
       else if (field === 4) vehicle.status = value;
       else if (field === 5) vehicle.timestamp = value;
     });
-    if (trip && ROUTES.has(trip.route)) feed.vehicles.set(trip.tripId, vehicle);
+    if (trip && routes.has(trip.route)) feed.vehicles.set(trip.tripId, vehicle);
   }
 
   function mergeFeeds(feeds) {
@@ -177,9 +168,9 @@
     return active;
   }
 
-  // Timetabled trips for one service day that the live feed doesn't cover yet: not already
-  // live, and boarding later than the latest live prediction for that route at that stop.
-  function scheduledTrips(schedule, year, month, day, liveTrips) {
+  // Timetabled trips on `routes` for one service day that the live feed doesn't cover yet: not
+  // already live, and boarding later than the latest live prediction for that route at that stop.
+  function scheduledTrips(schedule, year, month, day, liveTrips, routes) {
     const services = activeServices(schedule, year, month, day);
     // GTFS times count from noon minus 12h, which stays correct across DST changes.
     const origin = nyEpoch(year, month, day, 12, 0, 0) - 12 * 3600;
@@ -191,16 +182,15 @@
       }
     });
     const trips = new Map();
-    for (const [tripId, route, service, slots] of schedule.trips) {
-      if (!services.has(service) || liveTrips.has(tripId)) continue;
+    for (const [tripId, route, service, stops] of schedule.trips) {
+      if (!routes.has(route) || !services.has(service) || liveTrips.has(tripId)) continue;
       const times = {};
       let first = null;
-      slots.forEach((slot, i) => {
-        if (!slot) return;
-        const stop = schedule.stops[i];
-        times[stop] = [origin + slot[0], origin + slot[1]];
+      for (const [index, arrive, depart] of stops) {
+        const stop = schedule.stops[index];
+        times[stop] = [origin + arrive, origin + depart];
         if (first === null || times[stop][1] < times[first][1]) first = stop;
-      });
+      }
       if (first === null || times[first][1] <= (horizon.get(route + "|" + first) || 0)) continue;
       trips.set("sched:" + tripId, { tripId, route, times, lastStop: null, scheduled: true });
     }
@@ -210,87 +200,104 @@
   const board = (trip, stop) => (trip.times[stop] ? trip.times[stop][1] : null);
   const alight = (trip, stop) => (trip.times[stop] ? trip.times[stop][0] : null);
 
-  function byRoute(trips, routes) {
-    return [...trips.values()].filter((trip) => routes.has(trip.route));
-  }
-
-  // Earliest 6 from Grand Central to 51 St, boarding no sooner than `ready`.
-  function bestLocal(locals, ready) {
-    let best = null;
-    for (const local of locals) {
-      const leave = board(local, GRAND_CENTRAL);
-      const arrive = alight(local, FIFTY_FIRST);
-      if (leave === null || arrive === null || leave < ready || arrive < leave) continue;
-      if (!best || arrive < alight(best, FIFTY_FIRST)) best = local;
-    }
-    return best;
-  }
-
-  // Earliest 51 St arrival via a 4/5 boarded at Fulton no sooner than `ready`.
-  function bestExpress(expresses, locals, ready, sixTransfer) {
-    let best = null;
-    for (const express of expresses) {
-      const leave = board(express, FULTON_45);
-      const reach = alight(express, GRAND_CENTRAL);
-      if (leave === null || reach === null || leave < ready || reach < leave) continue;
-      const local = bestLocal(locals, reach + sixTransfer);
-      if (local && (!best || alight(local, FIFTY_FIRST) < alight(best.local, FIFTY_FIRST))) {
-        best = { express, local };
+  // A path is a list of legs {routes, from, to}. gaps[i] is the time needed between stepping off
+  // leg i-1 and boarding leg i. For every leg, returns its trips sorted by boarding time, each
+  // linked to the onward connection that reaches the end soonest:
+  // [[{trip, board, alight, next, arrive}, ...] per leg]
+  function connections(trips, path, gaps) {
+    const legs = path.map((leg) => {
+      const routes = new Set(leg.routes);
+      const entries = [];
+      trips.forEach((trip) => {
+        if (!routes.has(trip.route)) return;
+        const on = board(trip, leg.from);
+        const off = alight(trip, leg.to);
+        if (on !== null && off !== null && off > on) entries.push({ trip, board: on, alight: off, next: null, arrive: null });
+      });
+      return entries.sort((a, b) => a.board - b.board);
+    });
+    // best[i][k]: of the leg-i entries from index k on, the one that arrives soonest.
+    const best = legs.map(() => []);
+    for (let i = legs.length - 1; i >= 0; i--) {
+      for (const entry of legs[i]) {
+        if (i === legs.length - 1) {
+          entry.arrive = entry.alight;
+        } else {
+          entry.next = soonest(legs[i + 1], best[i + 1], entry.alight + gaps[i + 1]);
+          entry.arrive = entry.next ? entry.next.arrive : null;
+        }
+      }
+      let leader = null;
+      for (let k = legs[i].length - 1; k >= 0; k--) {
+        const entry = legs[i][k];
+        // Strictly earlier only, so a tie keeps the later train and its longer transfer.
+        if (entry.arrive !== null && (!leader || entry.arrive < leader.arrive)) leader = entry;
+        best[i][k] = leader;
       }
     }
-    return best;
+    return legs;
   }
 
-  // For every A/C still due at Hoyt, the earliest-arriving connection to 51 St.
-  function plan(trips, acTransfer, sixTransfer) {
-    const expresses = byRoute(trips, EXPRESS_ROUTES);
-    const locals = byRoute(trips, LOCAL_ROUTES);
-    const journeys = [];
-    for (const ac of byRoute(trips, AC_ROUTES)) {
-      const leave = board(ac, HOYT);
-      const reach = alight(ac, FULTON_AC);
-      if (leave === null || reach === null || reach <= leave) continue;
-      const rest = bestExpress(expresses, locals, reach + acTransfer, sixTransfer);
-      if (!rest) continue;
-      const arrive = alight(rest.local, FIFTY_FIRST);
-      journeys.push({ ac, express: rest.express, local: rest.local, depart: leave, arrive, seconds: arrive - leave });
+  // The entry boarding no sooner than `ready` that arrives soonest, by binary search.
+  function soonest(entries, best, ready) {
+    let lo = 0;
+    let hi = entries.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (entries[mid].board < ready) lo = mid + 1;
+      else hi = mid;
     }
+    return lo < entries.length ? best[lo] : null;
+  }
+
+  // For every train still due at the start of each path, the soonest-arriving connection to the end.
+  // paths: list of paths; gapsFor(path) -> gaps for that path.
+  function plan(trips, paths, gapsFor) {
+    const journeys = [];
+    paths.forEach((path, index) => {
+      for (const first of connections(trips, path, gapsFor(path))[0]) {
+        if (first.arrive === null) continue;
+        const legs = [];
+        for (let entry = first; entry; entry = entry.next) legs.push(entry.trip);
+        journeys.push({ path: index, trips: legs, depart: first.board, arrive: first.arrive, seconds: first.arrive - first.board });
+      }
+    });
     return journeys;
   }
 
   // Shortest first, ties to the later departure, one per (depart, arrive).
   function rank(journeys) {
+    return dedupe(journeys).sort((a, b) => a.seconds - b.seconds || b.depart - a.depart);
+  }
+
+  // Soonest arrival first, ties to the later departure, dropping any journey that another one
+  // beats on both ends (leaves no earlier and arrives no later).
+  function rankByArrival(journeys) {
+    const sorted = [...journeys].sort((a, b) => a.arrive - b.arrive || b.depart - a.depart);
+    const kept = [];
+    for (const journey of sorted) {
+      if (!kept.length || journey.depart > kept[kept.length - 1].depart) kept.push(journey);
+    }
+    return kept;
+  }
+
+  function dedupe(journeys) {
     const unique = new Map();
     for (const journey of journeys) unique.set(journey.depart + ":" + journey.arrive, journey);
-    return [...unique.values()].sort((a, b) => a.seconds - b.seconds || b.depart - a.depart);
+    return [...unique.values()];
   }
 
-  // Every 4/5 leaving Fulton after `reach`, each with its resulting 51 St arrival.
-  function fultonOptions(trips, reach, sixTransfer, limit) {
-    const locals = byRoute(trips, LOCAL_ROUTES);
-    return byRoute(trips, EXPRESS_ROUTES)
-      .filter((express) => board(express, FULTON_45) > reach && alight(express, GRAND_CENTRAL) !== null)
-      .sort((a, b) => board(a, FULTON_45) - board(b, FULTON_45))
+  // The next `limit` trains on leg `index` boarding at or after `reach`, each with its arrival at the end.
+  function transferOptions(trips, path, gaps, index, reach, limit) {
+    return connections(trips, path, gaps)[index]
+      .filter((entry) => entry.board >= reach)
       .slice(0, limit)
-      .map((express) => {
-        const local = bestLocal(locals, alight(express, GRAND_CENTRAL) + sixTransfer);
-        return { express, gap: board(express, FULTON_45) - reach, local, arrive: local ? alight(local, FIFTY_FIRST) : null };
-      });
-  }
-
-  // Every 6 leaving Grand Central at or after `reach`.
-  function grandCentralOptions(trips, reach, limit) {
-    return byRoute(trips, LOCAL_ROUTES)
-      .filter((local) => board(local, GRAND_CENTRAL) >= reach && alight(local, FIFTY_FIRST) !== null)
-      .sort((a, b) => board(a, GRAND_CENTRAL) - board(b, GRAND_CENTRAL))
-      .slice(0, limit)
-      .map((local) => ({ local, gap: board(local, GRAND_CENTRAL) - reach, arrive: alight(local, FIFTY_FIRST) }));
+      .map((entry) => ({ trip: entry.trip, board: entry.board, gap: entry.board - reach, arrive: entry.arrive, onward: entry }));
   }
 
   const api = {
-    HOYT, FULTON_AC, FULTON_45, GRAND_CENTRAL, FIFTY_FIRST,
     parseFeed, mergeFeeds, nyFields, nyEpoch, scheduledTrips,
-    board, alight, plan, rank, fultonOptions, grandCentralOptions,
+    board, alight, connections, plan, rank, rankByArrival, dedupe, transferOptions,
   };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.Planner = api;

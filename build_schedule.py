@@ -1,4 +1,4 @@
-"""Extract the timetable for this commute from the MTA's static GTFS into schedule.json.
+"""Extract the timetable for the commute pages from the MTA's static GTFS into schedule.json.
 
 The browser can't download the GTFS zip itself (no CORS on it), so a GitHub Action runs
 this daily and commits the result. Uses the supplemented feed, which folds in planned
@@ -16,8 +16,10 @@ import zipfile
 from datetime import datetime, timezone
 
 SOURCE = "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_supplemented.zip"
-STOPS = ["A42N", "A38N", "418N", "631N", "630N"]
-ROUTES = {"A", "C", "4", "5", "6", "6X"}
+# Every station and line routes.js uses, both directions.
+STATIONS = ["A42", "A41", "A38", "A32", "418", "631", "630", "635", "D20", "D19"]
+STOPS = [station + direction for station in STATIONS for direction in "NS"]
+ROUTES = {"A", "C", "4", "5", "6", "6X", "F", "FX", "M"}
 
 
 def seconds(hms: str) -> int:
@@ -59,8 +61,9 @@ def main() -> None:
     stop_index = {stop: i for i, stop in enumerate(STOPS)}
     for row in rows(archive, "stop_times.txt"):
         if row["stop_id"] in stop_index and row["trip_id"] in trips:
-            slots = times.setdefault(row["trip_id"], [None] * len(STOPS))
-            slots[stop_index[row["stop_id"]]] = [seconds(row["arrival_time"]), seconds(row["departure_time"])]
+            times.setdefault(row["trip_id"], []).append(
+                [stop_index[row["stop_id"]], seconds(row["arrival_time"]), seconds(row["departure_time"])]
+            )
 
     names = {row["stop_id"]: row["stop_name"] for row in rows(archive, "stops.txt") if row["location_type"] == "1"}
 
@@ -71,9 +74,10 @@ def main() -> None:
         "stops": STOPS,
         "services": services,
         "exceptions": exceptions,
-        # [realtime trip id, route, service_id, per-stop [arrive, depart] seconds after service-day start]
+        # [realtime trip id, route, service_id, [[index into stops, arrive, depart], ...]] with times in
+        # seconds after service-day start
         "trips": [
-            [trip_id.split("_", 1)[-1], *trips[trip_id], slots] for trip_id, slots in sorted(times.items())
+            [trip_id.split("_", 1)[-1], *trips[trip_id], sorted(stops)] for trip_id, stops in sorted(times.items())
         ],
     }
     with open(output, "w") as handle:

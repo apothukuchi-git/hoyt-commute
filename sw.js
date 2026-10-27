@@ -1,7 +1,10 @@
-// Offline shell for the commute page. Same-origin files only: MTA feed requests go straight
+// Offline shell for the commute pages. Same-origin files only: MTA feed requests go straight
 // to the network, and the page keeps its own saved copy of the last good trains.
-const CACHE = "hoyt-commute-v1";
-const SHELL = ["./", "./index.html", "./planner.js", "./schedule.json"];
+const CACHE = "mta-commute-v1";
+const SHELL = [
+  "./", "./index.html", "./style.css", "./routes.js", "./planner.js", "./app.js", "./schedule.json",
+  "./hoyt-to-51st.html", "./union-sq-to-51st.html", "./51st-to-hoyt.html", "./hoyt-to-14st.html", "./14st-to-hoyt.html",
+];
 const NETWORK_WAIT_MS = 4000;
 
 self.addEventListener("install", (event) => {
