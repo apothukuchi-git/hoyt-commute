@@ -117,8 +117,8 @@ h2 {
 .leg .where { min-width: 0; }
 .leg .where div:first-child { font-weight: 600; }
 .leg .where div + div { font-size: 13px; color: var(--muted); }
-.leg .src { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-.leg .src.sched { color: var(--warn); }
+.src { font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.src.sched { color: var(--warn); }
 .xfer { margin-left: 34px; }
 .chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -513,7 +513,7 @@ footer.wrap { padding-block: 0 28px; }
     const acReach = acTrip ? P.alight(acTrip, P.FULTON_AC) : null;
     const expressReach = express ? P.alight(express, P.GRAND_CENTRAL) : null;
     const onExpress = express && expressReach && (!acReach || acReach < now());
-    let html = '<div class="card best"><div class="track-head"><h3>Tracking ' + bullet(onExpress ? express.route : (acTrip ? acTrip.route : "A")) + " your trip</h3>" +
+    let html = '<div class="card best"><div class="track-head"><h3>Tracking your ' + bullet(onExpress ? express.route : (acTrip ? acTrip.route : "A")) + "</h3>" +
       '<button class="ghost" type="button" data-stop>Stop</button></div>';
 
     if (!onExpress) {
