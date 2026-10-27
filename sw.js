@@ -8,7 +8,8 @@ const SHELL = [
 const NETWORK_WAIT_MS = 4000;
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
+  const fresh = SHELL.map((url) => new Request(url, { cache: "reload" }));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(fresh)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
@@ -26,9 +27,12 @@ self.addEventListener("fetch", (event) => {
 });
 
 // Fresh copy when the network answers quickly; the cached copy when it doesn't or is down.
+// no-cache revalidates with GitHub Pages instead of trusting its 10-minute max-age, so a new
+// deploy shows up on the next load; an unchanged file costs only a 304. Fetching by URL because a
+// navigation request can't be copied with new options.
 async function networkFirst(request) {
   const cache = await caches.open(CACHE);
-  const network = fetch(request).then((response) => {
+  const network = fetch(request.url, { cache: "no-cache" }).then((response) => {
     if (response.ok) cache.put(request, response.clone());
     return response;
   });
