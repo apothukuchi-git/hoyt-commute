@@ -62,7 +62,7 @@
     "union-sq-to-51st": {
       from: "Union Sq", to: "51 St", fromRoutes: ["4", "5", "6"], toRoutes: ["6"],
       feeds: [NUMBERED_FEED],
-      mode: "window", earliest: "09:20", latest: "09:30",
+      mode: "now", earliest: "09:20", latest: "09:30",
       transfers: { grandCentral: ["4/5 to 6 at Grand Central", 0] },
       paths: [
         [{ routes: LEX_LOCAL, from: "635N", to: "630N" }],
