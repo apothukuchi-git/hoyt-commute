@@ -52,7 +52,7 @@
     return String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
 
-  const LINE_COLORS = { A: "ace", C: "ace", E: "ace", F: "ind", M: "ind", B: "ind", D: "ind" };
+  const LINE_COLORS = { A: "ace", C: "ace", E: "ace", F: "ind", M: "ind", B: "ind", D: "ind", G: "g" };
 
   function bullet(route) {
     const kind = LINE_COLORS[route.replace("X", "")] || "lex";

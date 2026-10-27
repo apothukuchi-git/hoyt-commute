@@ -10,6 +10,7 @@
   --ace: #0039a6;
   --lex: #00933c;
   --ind: #ff6319;
+  --g: #6cbe45;
   --ok: #1d7f46;
   --ok-bg: #e2f3e8;
   --warn: #9a5b00;
@@ -97,6 +98,7 @@ h2 {
 .bullet.ace { background: var(--ace); }
 .bullet.lex { background: var(--lex); }
 .bullet.ind { background: var(--ind); }
+.bullet.g { background: var(--g); }
 .sign .bullet { font-size: 14px; }
 .headline { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .leave { font: 700 28px/1 var(--display); }

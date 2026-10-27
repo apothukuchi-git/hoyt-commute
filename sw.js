@@ -3,7 +3,7 @@
 const CACHE = "mta-commute-v1";
 const SHELL = [
   "./", "./index.html", "./style.css", "./routes.js", "./planner.js", "./app.js", "./schedule.json",
-  "./hoyt-to-51st.html", "./union-sq-to-51st.html", "./51st-to-hoyt.html", "./hoyt-to-14st.html", "./14st-to-hoyt.html",
+  "./hoyt-to-51st.html", "./union-sq-to-51st.html", "./51st-lex-to-hoyt.html", "./hoyt-to-14st.html", "./14st-to-hoyt.html",
 ];
 const NETWORK_WAIT_MS = 4000;
 

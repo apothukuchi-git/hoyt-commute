@@ -5,7 +5,8 @@ Phone pages that plan subway commutes from the MTA's real-time feeds, directly f
 
 - `hoyt-to-51st.html`: Hoyt-Schermerhorn → 51 St, by A/C, 4/5 at Fulton St, and 6 at Grand Central.
 - `union-sq-to-51st.html`: Union Sq → 51 St, by the 6 direct or 4/5 with a change to the 6 at Grand Central.
-- `51st-to-hoyt.html`: 51 St → Hoyt-Schermerhorn, by 6, 4/5 at Grand Central, and A/C at Fulton St.
+- `51st-lex-to-hoyt.html`: 51 St or Lexington Av-53 St → Hoyt-Schermerhorn, by 6, 4/5 at Grand Central, and A/C at
+  Fulton St, or by E/F to Court Sq and the G.
 - `hoyt-to-14st.html`: Hoyt-Schermerhorn → 14 St (F/M), by A/C and then F at Jay St or F/M at W 4 St.
 - `14st-to-hoyt.html`: 14 St (F/M) → Hoyt-Schermerhorn, the same in reverse.
 

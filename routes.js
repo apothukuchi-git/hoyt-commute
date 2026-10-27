@@ -7,16 +7,20 @@
   // The 4 makes local stops late at night.
   const LEX_LOCAL = ["6", "6X", "4"];
   const SIXTH_AV = ["F", "FX", "M"];
+  // Since the F/M swap the F runs with the E through Lexington Av/53 St and Court Sq.
+  const QUEENS_53 = ["E", "F", "FX"];
+  const CROSSTOWN = ["G"];
   // The M leaves the F at W 4 St, so only the F reaches Jay St.
   const F_ONLY = ["F", "FX"];
   const ACE_FEED = "nyct%2Fgtfs-ace";
   const NUMBERED_FEED = "nyct%2Fgtfs";
   const BDFM_FEED = "nyct%2Fgtfs-bdfm";
+  const G_FEED = "nyct%2Fgtfs-g";
 
   const STOP_NAMES = {
     A42: "Hoyt-Schermerhorn", A41: "Jay St", A38: "Fulton St", A32: "W 4 St",
     418: "Fulton St", 631: "Grand Central", 630: "51 St", 635: "Union Sq",
-    D20: "W 4 St", D19: "14 St",
+    D20: "W 4 St", D19: "14 St", F11: "Lex Av-53 St", F09: "Court Sq", G22: "Court Sq",
   };
 
   // transfers: key -> [label, default minutes]. Each leg after the first names the transfer before it.
@@ -33,16 +37,27 @@
         { routes: LEX_LOCAL, from: "631N", to: "630N", transfer: "grandCentral" },
       ]],
     },
-    "51st-to-hoyt": {
-      from: "51 St", to: "Hoyt-Schermerhorn", fromRoutes: ["6"], toRoutes: AC,
-      feeds: [NUMBERED_FEED, ACE_FEED],
+    // Starts from either platform of the 51 St / Lexington Av-53 St station.
+    "51st-lex-to-hoyt": {
+      from: "51 St / Lex Av-53 St", to: "Hoyt-Schermerhorn", fromRoutes: ["6", "E", "F"], toRoutes: ["A", "C", "G"],
+      feeds: [NUMBERED_FEED, ACE_FEED, BDFM_FEED, G_FEED],
       mode: "now", earliest: "18:30", latest: "18:45",
-      transfers: { grandCentral: ["6 to 4/5 at Grand Central", 0], fulton: ["4/5 to A/C at Fulton St", 1] },
-      paths: [[
-        { routes: LEX_LOCAL, from: "630S", to: "631S" },
-        { routes: EXPRESS, from: "631S", to: "418S", transfer: "grandCentral" },
-        { routes: AC, from: "A38S", to: "A42S", transfer: "fulton" },
-      ]],
+      transfers: {
+        grandCentral: ["6 to 4/5 at Grand Central", 0],
+        fulton: ["4/5 to A/C at Fulton St", 1],
+        courtSq: ["E/F to G at Court Sq", 3],
+      },
+      paths: [
+        [
+          { routes: LEX_LOCAL, from: "630S", to: "631S" },
+          { routes: EXPRESS, from: "631S", to: "418S", transfer: "grandCentral" },
+          { routes: AC, from: "A38S", to: "A42S", transfer: "fulton" },
+        ],
+        [
+          { routes: QUEENS_53, from: "F11N", to: "F09N" },
+          { routes: CROSSTOWN, from: "G22S", to: "A42S", transfer: "courtSq" },
+        ],
+      ],
     },
     "union-sq-to-51st": {
       from: "Union Sq", to: "51 St", fromRoutes: ["4", "5", "6"], toRoutes: ["6"],

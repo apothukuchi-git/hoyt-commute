@@ -17,9 +17,9 @@ from datetime import datetime, timezone
 
 SOURCE = "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_supplemented.zip"
 # Every station and line routes.js uses, both directions.
-STATIONS = ["A42", "A41", "A38", "A32", "418", "631", "630", "635", "D20", "D19"]
+STATIONS = ["A42", "A41", "A38", "A32", "418", "631", "630", "635", "D20", "D19", "F11", "F09", "G22"]
 STOPS = [station + direction for station in STATIONS for direction in "NS"]
-ROUTES = {"A", "C", "4", "5", "6", "6X", "F", "FX", "M"}
+ROUTES = {"A", "C", "E", "4", "5", "6", "6X", "F", "FX", "M", "G"}
 
 
 def seconds(hms: str) -> int:
