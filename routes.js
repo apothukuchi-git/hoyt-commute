@@ -20,7 +20,7 @@
   const STOP_NAMES = {
     A42: "Hoyt-Schermerhorn", A41: "Jay St", A38: "Fulton St", A32: "W 4 St",
     418: "Fulton St", 631: "Grand Central", 630: "51 St", 635: "Union Sq",
-    D20: "W 4 St", D19: "14 St", F11: "Lex Av-53 St", F09: "Court Sq", G22: "Court Sq",
+    D20: "W 4 St", D19: "14 St", 637: "Bleecker St", D21: "Broadway-Lafayette St", F11: "Lex Av-53 St", F09: "Court Sq", G22: "Court Sq",
   };
 
   // transfers: key -> [label, default minutes]. Each leg after the first names the transfer before it.
@@ -46,6 +46,8 @@
         grandCentral: ["6 to 4/5 at Grand Central", 0],
         fulton: ["4/5 to A/C at Fulton St", 1],
         courtSq: ["E/F to G at Court Sq", 2],
+        bleecker: ["6 to F at Broadway-Lafayette", 2],
+        jay: ["F to A/C at Jay St", 0],
       },
       paths: [
         [
@@ -56,6 +58,11 @@
         [
           { routes: QUEENS_53, from: "F11N", to: "F09N" },
           { routes: CROSSTOWN, from: "G22S", to: "A42S", transfer: "courtSq" },
+        ],
+        [
+          { routes: LEX_LOCAL, from: "630S", to: "637S" },
+          { routes: F_ONLY, from: "D21S", to: "A41S", transfer: "bleecker" },
+          { routes: AC, from: "A41S", to: "A42S", transfer: "jay" },
         ],
       ],
     },
