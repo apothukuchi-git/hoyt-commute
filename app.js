@@ -21,6 +21,9 @@
   // Hard floor between trains at every transfer, whatever the settings say, so a held door
   // on the train you're on doesn't cost you the connection.
   const MIN_TRANSFER_SECONDS = 15;
+  // The feed keeps a stop on a train's trip until it pulls out, but its predicted departure
+  // often slips into the past while it's still at the platform. Live trains stay listed this long.
+  const BOARDING_GRACE_SECONDS = 300;
   const STORE_KEY = "mta-commute:" + ID;
   const FEED_STORE_KEY = "mta-commute:" + ID + ":feeds";
   const ROUTES = new Set(C.paths.flat().flatMap((leg) => leg.routes));
@@ -137,7 +140,7 @@
 
   function countdown(epoch) {
     const seconds = Math.round(epoch - now());
-    if (seconds <= 0) return seconds > -60 ? "now" : "gone";
+    if (seconds <= 0) return seconds > -BOARDING_GRACE_SECONDS ? "now" : "gone";
     if (seconds >= 3600) return Math.floor(seconds / 3600) + "h " + String(Math.floor((seconds % 3600) / 60)).padStart(2, "0") + "m";
     return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
   }
@@ -162,6 +165,9 @@
     const kind = spare < 0 ? "sprint" : spare < 60 ? "tight" : "easy";
     return '<span class="chip ' + kind + '">' + mmss(gap) + " to transfer · " + kind + "</span>";
   }
+
+  // A live train counts until the feed drops its boarding stop (or the grace runs out); a timetable one until it's due.
+  const stillDue = (journey) => journey.depart >= now() - (journey.trips[0].scheduled ? 0 : BOARDING_GRACE_SECONDS);
 
   function findTrip(id) {
     return state.trips.get(id) || state.trips.get("sched:" + id) || null;
@@ -348,7 +354,7 @@
       '<div class="travel"><b>' + (journey.seconds / 60).toFixed(1) + "</b> min</div></div>" +
       '<div class="legs">' + legs + "</div>" +
       '<div class="arrive">Arrive ' + escapeHtml(C.to) + " <b>" + clock(journey.arrive) + "</b></div>" +
-      '<button class="act" type="button" data-track="' + escapeHtml(track) + '">I\'m on this ' + escapeHtml(journey.trips[0].route.replace("X", "")) + "</button>" +
+      '<button class="act" type="button" data-track="' + escapeHtml(track) + '">I\'m on the ' + shortClock(journey.depart) + " " + escapeHtml(journey.trips[0].route.replace("X", "")) + "</button>" +
       "</article>"
     );
   }
@@ -365,10 +371,10 @@
     $("alerts").innerHTML = alerts.join("");
     if (!state.live && !state.schedule) { $("plans").innerHTML = ""; return; }
 
-    const journeys = P.plan(state.trips, C.paths, gapsFor).filter((j) => j.depart > now() - 30);
+    const journeys = P.plan(state.trips, C.paths, gapsFor).filter(stillDue);
     if (leaveNow) {
-      const upcoming = P.rankByArrival(journeys.filter((j) => j.depart >= now()));
-      renderNearby(journeys.filter((j) => j.depart >= now() && j.depart <= bounds.latest), upcoming[0], null);
+      const upcoming = P.rankByArrival(journeys);
+      renderNearby(journeys.filter((j) => j.depart <= bounds.latest), upcoming[0], null);
       $("plans").innerHTML = upcoming.length
         ? upcoming.slice(0, 3).map((j, i) => journeyCard(j, i === 0)).join("")
         : '<p class="note">No trips in the feed or timetable right now.</p>';
@@ -380,7 +386,7 @@
       $("plans").innerHTML = inWindow.slice(0, 3).map((j, i) => journeyCard(j, i === 0)).join("");
       return;
     }
-    const soonest = P.rankByArrival(journeys.filter((j) => j.depart >= now())).slice(0, 2);
+    const soonest = P.rankByArrival(journeys).slice(0, 2);
     $("plans").innerHTML =
       '<p class="note">No trip arrives inside the window with these transfer times.' + (soonest.length ? " The next trips leaving now:" : "") + "</p>" +
       soonest.map((j) => journeyCard(j, false)).join("");
@@ -440,6 +446,8 @@
     const onRoute = trips[current] ? trips[current].route : path[current].routes[0];
     let html = statusAlert() + '<div class="card best"><div class="track-head"><h3>Tracking your ' + bullet(onRoute) + "</h3>" +
       '<button class="ghost" type="button" data-stop>Stop</button></div>';
+    // Until the first train pulls out, its neighbours at the platform stay one tap away.
+    let switcher = "";
 
     for (let i = current; i < path.length; i++) {
       const trip = trips[i];
@@ -451,8 +459,11 @@
         break;
       }
       const leaves = P.board(trip, leg.from);
-      if (i === current && leaves > now()) {
+      if (i === 0 && leaves !== null) {
         html += '<div><div class="big-eta">Leaves ' + stopName(leg.from) + " " + clock(leaves) + ' <span class="sub" data-countdown="' + leaves + '"></span></div></div>';
+        const boarding = P.transferOptions(state.trips, path, gapsFor(path), 0, now() - BOARDING_GRACE_SECONDS, TRANSFER_OPTIONS + 1)
+          .filter((o) => !o.trip.scheduled || o.board >= now());
+        switcher = "<h2>Not this one? " + routeNames(leg) + " at " + stopName(leg.from) + " · tap the one you're on</h2>" + optionList(boarding, 0, 0, trip.tripId);
       }
       html += '<div><div class="big-eta">' + (i === current ? "Reaches " : "Your " + escapeHtml(trip.route.replace("X", "")) + " reaches ") + stopName(leg.to) + " " + clock(reach(i)) +
         ' <span class="sub" data-countdown="' + reach(i) + '"></span></div>' +
@@ -464,7 +475,7 @@
         optionList(options, i + 1, transferSeconds(next.transfer), picks[i + 1]);
       if (!picks[i + 1]) break;
     }
-    box.innerHTML = html + "</div>";
+    box.innerHTML = html + switcher + "</div>";
   }
 
   function vehicleLine(trip) {
@@ -480,7 +491,7 @@
     return '<div class="options">' + options.map((o) =>
       '<button class="option' + (o.trip.tripId === chosenId ? " chosen" : "") + '" type="button" data-pick="' + legIndex + ":" + escapeHtml(o.trip.tripId) + '">' +
       bullet(o.trip.route) +
-      '<div><div class="when">' + clock(o.board) + "</div><div>" + gapChip(o.gap, transfer) + " " + source(o.trip) + "</div></div>" +
+      '<div><div class="when">' + clock(o.board) + "</div><div>" + (legIndex === 0 ? '<span class="sub" data-countdown="' + o.board + '"></span>' : gapChip(o.gap, transfer)) + " " + source(o.trip) + "</div></div>" +
       '<div class="then">' + escapeHtml(C.to) + "<br><b>" + (o.arrive ? clock(o.arrive) : "—") + "</b></div></button>"
     ).join("") + "</div>";
   }
